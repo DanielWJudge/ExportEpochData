@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,7 @@ namespace ExportEpochData
     public partial class MainWindow : Form
     {
         private List<string> _filenames;
+        private List<string> _columnNames;
 
         public MainWindow()
         {
@@ -23,6 +25,11 @@ namespace ExportEpochData
             buttonAddFiles.Click += (sender, args) => ButtonAddFilesClicked();
             linkLabelClearFiles.Click += (sender, args) => LinkLabelClearFilesClicked();
             buttonExport.Click += (sender, args) => ButtonExportClicked();
+            this.HandleCreated += (sender, args) =>
+            {
+                checkedListBox1.SetItemCheckState(0, CheckState.Checked);
+                checkedListBox1.SetItemCheckState(1, CheckState.Checked);
+            };
         }
 
         private void ButtonExportClicked()
@@ -57,55 +64,18 @@ namespace ExportEpochData
                     using (var writer = new StreamWriter(exportFileName))
                     using (var csv = new CsvWriter(writer, config))
                     {
-                        ExportOptions exportOptions = new ExportOptions
-                        {
-                            Axis1 = checkBoxAxis1.Checked,
-                            Axis2 = checkBoxAxis2.Checked,
-                            Axis3 = checkBoxAxis3.Checked,
-                            Filename = checkBoxFilename.Checked,
-                            Hr = checkBoxHr.Checked,
-                            Inclinometer = checkBoxInclinometer.Checked,
-                            Lux = checkBoxLux.Checked,
-                            Steps = checkBoxSteps.Checked,
-                            SubjectName = checkBoxSubjectName.Checked,
-                            Timestamps = checkBoxTimestamps.Checked
-                        };
+                        CheckedListBox.CheckedItemCollection checkedItems = checkedListBox1.CheckedItems;
+                        var columnNames = from object checkedItem in checkedItems select checkedItem.ToString();
 
                         //add header
-
-                        if (exportOptions.Filename)
-                            csv.WriteField("Filename");
-
-                        if (exportOptions.SubjectName)
-                            csv.WriteField("Subject Name");
-
-                        if (exportOptions.Timestamps)
-                            csv.WriteField("Timestamp");
-
-                        if (exportOptions.Axis1)
-                            csv.WriteField("Axis1");
-
-                        if (exportOptions.Axis2)
-                            csv.WriteField("Axis2");
-
-                        if (exportOptions.Axis3)
-                            csv.WriteField("Axis3");
-
-                        if (exportOptions.Steps)
-                            csv.WriteField("Steps");
-
-                        if (exportOptions.Hr)
-                            csv.WriteField("HR");
-
-                        if (exportOptions.Lux)
-                            csv.WriteField("Lux");
-
-                        if (exportOptions.Inclinometer)
+                        foreach (var columnName in columnNames)
                         {
-                            csv.WriteField("Inclinometer Off");
-                            csv.WriteField("Inclinometer Standing");
-                            csv.WriteField("Inclinometer Sitting");
-                            csv.WriteField("Inclinometer Lying");
+                            if (columnName.Equals("Filename", StringComparison.InvariantCultureIgnoreCase))
+                                csv.WriteField("Filename");
+                            else if (columnName.Equals("Subject Name", StringComparison.InvariantCultureIgnoreCase))
+                                csv.WriteField("Subject Name");
+                            else
+                                csv.WriteField(columnName);
                         }
 
                         csv.NextRecord();
@@ -134,66 +104,58 @@ namespace ExportEpochData
                             string filenameWithoutPath = file.Name;
 
                             int percentage = Math.Min(100, (int) ((double) (currentFileCount - 1)/totalFilesToCalculate*100.0));
-                            
+
                             progressDialog.ReportProgress(percentage, string.Format("Calculating File {0} of {1}", currentFileCount, totalFilesToCalculate), "");
 
                             string connectionString = GetSQLiteConnectionString(filename);
                             using (var db = new OrmLiteConnectionFactory(connectionString, SqliteDialect.Provider).OpenDbConnection())
                             {
-								//string subjectName = "filename";
-								//var firstOrDefault = db.Select<AgdSettings>().FirstOrDefault(x => x.Name.Equals("subjectname"));
-								//if (firstOrDefault != null)
-								//	subjectName = firstOrDefault.Value;
+                                string subjectName = "filename";
+                                var firstOrDefault = db.Select<AgdSettings>().FirstOrDefault(x => x.Name.Equals("subjectname"));
+                                if (firstOrDefault != null)
+                                    subjectName = firstOrDefault.Value;
 
-								//long totalEpochs = db.Count<AgdTableTimestampAllWaist>();
-								//long epochCount = 0;
-                                
-								//foreach (var epoch in db.SelectLazy<AgdTableTimestampAllWaist>())
-								//{
-								//	if (++epochCount%100 == 0)
-								//	{
-								//		progressDialog.ReportProgress(percentage,
-								//			string.Format("Exporting File {0} of {1}", currentFileCount,
-								//				totalFilesToCalculate), string.Format("Exporting epoch #{0} of {1} for file: {2}", epochCount, totalEpochs, filenameWithoutPath));
-								//	}
+                                long totalEpochs = db.Count<AgdTableTimestampAxis1>();
+                                long epochCount = 0;
 
-								//	if (exportOptions.Filename)
-								//		csv.WriteField(filenameWithoutPath);
+                                var fileColumns = GetColumnsFromFile(db);
 
-								//	if (exportOptions.SubjectName)
-								//		csv.WriteField(subjectName);
+                                var cmd = db.CreateCommand();
+                                cmd.CommandText = "select * from data order by dataTimestamp";
+                                //pull the tables in a reader
+                                using (cmd)
+                                {
+                                    using (var rdr = cmd.ExecuteReader())
+                                    {
+                                        while (rdr.Read())
+                                        {
+                                            if (++epochCount % 100 == 0)
+                                            {
+                                                progressDialog.ReportProgress(percentage,
+                                                    string.Format("Exporting File {0} of {1}", currentFileCount,
+                                                        totalFilesToCalculate),
+                                                    string.Format("Exporting epoch #{0} of {1} for file: {2}",
+                                                        epochCount, totalEpochs, filenameWithoutPath));
+                                            }
 
-								//	if (exportOptions.Timestamps)
-								//		csv.WriteField(string.Format("{0:G}", new DateTime(epoch.TimestampTicks)));
+                                            foreach (var columnName in columnNames)
+                                            {
+                                                if (columnName.Equals("Filename", StringComparison.InvariantCultureIgnoreCase))
+                                                    csv.WriteField(filenameWithoutPath);
+                                                else if (columnName.Equals("Subject Name", StringComparison.InvariantCultureIgnoreCase))
+                                                    csv.WriteField(subjectName);
+                                                else if (columnName.Equals("dataTimestamp", StringComparison.InvariantCultureIgnoreCase)) 
+                                                    csv.WriteField(string.Format("{0:G}", new DateTime(Convert.ToInt64(rdr["dataTimestamp"].ToString()))));
+                                                else if (fileColumns.Contains(columnName))
+                                                    csv.WriteField(rdr[columnName].ToString());
+                                                else
+                                                    csv.WriteField(0);
+                                            }
 
-								//	if (exportOptions.Axis1)
-								//		csv.WriteField(epoch.Axis1Counts);
-
-								//	if (exportOptions.Axis2)
-								//		csv.WriteField(epoch.Axis2Counts);
-
-								//	if (exportOptions.Axis3)
-								//		csv.WriteField(epoch.Axis3Counts);
-
-								//	if (exportOptions.Steps)
-								//		csv.WriteField(epoch.StepCounts);
-
-								//	if (exportOptions.Hr)
-								//		csv.WriteField(epoch.HrBPM);
-
-								//	if (exportOptions.Lux)
-								//		csv.WriteField(epoch.Lux);
-
-								//	if (exportOptions.Inclinometer)
-								//	{
-								//		csv.WriteField(epoch.OffSeconds);
-								//		csv.WriteField(epoch.StandingSeconds);
-								//		csv.WriteField(epoch.SittingSeconds);
-								//		csv.WriteField(epoch.LyingSeconds);
-								//	}
-
-								//	csv.NextRecord();
-								//}
+                                            csv.NextRecord();
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -236,6 +198,11 @@ namespace ExportEpochData
         private void ClearFilesAndUpdateUI()
         {
             _filenames.Clear();
+            _columnNames.Clear();
+            int itemCount = checkedListBox1.Items.Count;
+            for (int i = 2; i < itemCount; i++)
+                checkedListBox1.Items.RemoveAt(2);
+
             buttonExport.Enabled = false;
             flowLayoutPanelFiles.Visible = false;
         }
@@ -254,19 +221,64 @@ namespace ExportEpochData
             }
         }
 
-        private void AddFiles(string[] fileNames)
+        private void AddFiles(IEnumerable<string> fileNames)
         {
-            if (fileNames == null || fileNames.Length == 0)
+            if (fileNames == null || !fileNames.Any())
                 return;
 
             if (_filenames == null)
-                _filenames = new List<string>(fileNames.Length);
+                _filenames = new List<string>(fileNames.Count());
 
             _filenames.AddRange(fileNames.Where(x => !_filenames.Contains(x)));
+
+            GetDataColumnsForFiles(fileNames);
 
             labelTotalFilesLoaded.Text = string.Format("{0} Files Loaded", _filenames.Count);
             flowLayoutPanelFiles.Visible = true;
             buttonExport.Enabled = true;
+        }
+
+        private void GetDataColumnsForFiles(IEnumerable<string> fileNames)
+        {
+            if (fileNames == null || !fileNames.Any())
+                return;
+
+            if (_columnNames == null)
+                _columnNames = new List<string>(10);
+
+            var newColumns = new List<string>(10);
+
+            foreach (var filename in _filenames)
+            {
+                List<string> fileColumns;
+                string connectionString = GetSQLiteConnectionString(filename);
+                using (IDbConnection db = new OrmLiteConnectionFactory(connectionString, SqliteDialect.Provider).OpenDbConnection())
+                    fileColumns = GetColumnsFromFile(db);
+
+                foreach (var columnName in fileColumns)
+                    if (!_columnNames.Contains(columnName))
+                    {
+                        _columnNames.Add(columnName);
+                        newColumns.Add(columnName);
+                    }
+            }
+
+            //add any new columns to checked list box
+            foreach (var newColumn in newColumns)
+                checkedListBox1.Items.Add(newColumn, CheckState.Checked);
+        }
+
+        private List<string> GetColumnsFromFile(IDbConnection db)
+        {
+            List<string> fileColumns = new List<string>(10);
+            var cmd = db.CreateCommand();
+            cmd.CommandText = "PRAGMA table_info(data)";
+            //pull the tables in a reader
+            using (cmd)
+            using (var rdr = cmd.ExecuteReader())
+                while (rdr.Read())
+                    fileColumns.Add(rdr["name"].ToString().ToLowerInvariant());
+            return fileColumns;
         }
 
         private string GetSQLiteConnectionString(string filename)
@@ -301,20 +313,5 @@ namespace ExportEpochData
                 }
             }
         }
-    }
-
-    public class ExportOptions
-    {
-        public bool Filename { get; set; }
-        public bool SubjectName { get; set; }
-        public bool Timestamps { get; set; }
-        public bool Axis1 { get; set; }
-        public bool Axis2 { get; set; }
-        public bool Axis3 { get; set; }
-        public bool Steps { get; set; }
-        public bool Hr { get; set; }
-        public bool Lux { get; set; }
-        public bool Inclinometer { get; set; }
-
     }
 }
