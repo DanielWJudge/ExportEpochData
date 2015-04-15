@@ -17,6 +17,7 @@ namespace ExportEpochData
     {
         private List<string> _filenames;
         private List<string> _columnNames;
+        private long _totalEpochs;
 
         public MainWindow()
         {
@@ -30,6 +31,8 @@ namespace ExportEpochData
                 checkedListBox1.SetItemCheckState(0, CheckState.Checked);
                 checkedListBox1.SetItemCheckState(1, CheckState.Checked);
             };
+
+            _totalEpochs = 0;
         }
 
         private void ButtonExportClicked()
@@ -84,6 +87,7 @@ namespace ExportEpochData
 
                         //add information from file
                         int currentFileCount = 0;
+                        long epochCount = 0;
                         int totalFilesToCalculate = _filenames.Count;
                         foreach (var filename in _filenames)
                         {
@@ -102,11 +106,7 @@ namespace ExportEpochData
                             }
 
                             string filenameWithoutPath = file.Name;
-
-                            int percentage = Math.Min(100, (int) ((double) (currentFileCount - 1)/totalFilesToCalculate*100.0));
-
-                            progressDialog.ReportProgress(percentage, string.Format("Calculating File {0} of {1}", currentFileCount, totalFilesToCalculate), "");
-
+                            
                             string connectionString = GetSQLiteConnectionString(filename);
                             using (var db = new OrmLiteConnectionFactory(connectionString, SqliteDialect.Provider).OpenDbConnection())
                             {
@@ -116,12 +116,14 @@ namespace ExportEpochData
                                     subjectName = firstOrDefault.Value;
 
                                 long totalEpochs = db.Count<AgdTableTimestampAxis1>();
-                                long epochCount = 0;
+                                
 
                                 var fileColumns = GetColumnsFromFile(db);
 
                                 var cmd = db.CreateCommand();
                                 cmd.CommandText = "select * from data order by dataTimestamp";
+
+                                long currentFileEpoch = 0;
                                 //pull the tables in a reader
                                 using (cmd)
                                 {
@@ -129,13 +131,19 @@ namespace ExportEpochData
                                     {
                                         while (rdr.Read())
                                         {
-                                            if (++epochCount % 100 == 0)
+                                            currentFileEpoch++;
+                                            if (++epochCount % 10000 == 0)
                                             {
+                                                if (progressDialog.CancellationPending)
+                                                    return;
+
+                                                int percentage = Math.Min(100, (int)((double)(epochCount) / _totalEpochs * 100.0));
+
                                                 progressDialog.ReportProgress(percentage,
-                                                    string.Format("Exporting File {0} of {1}", currentFileCount,
-                                                        totalFilesToCalculate),
+                                                    string.Format("Exporting File {0} of {1} ({2}%)", currentFileCount,
+                                                        totalFilesToCalculate, percentage),
                                                     string.Format("Exporting epoch #{0} of {1} for file: {2}",
-                                                        epochCount, totalEpochs, filenameWithoutPath));
+                                                        currentFileEpoch, totalEpochs, filenameWithoutPath));
                                             }
 
                                             foreach (var columnName in columnNames)
@@ -205,6 +213,7 @@ namespace ExportEpochData
 
             buttonExport.Enabled = false;
             flowLayoutPanelFiles.Visible = false;
+            _totalEpochs = 0;
         }
 
         private void ButtonAddFilesClicked()
@@ -231,14 +240,14 @@ namespace ExportEpochData
 
             _filenames.AddRange(fileNames.Where(x => !_filenames.Contains(x)));
 
-            GetDataColumnsForFiles(fileNames);
+            GetDataColumnsAndTotalEpochsFromFiles(fileNames);
 
             labelTotalFilesLoaded.Text = string.Format("{0} Files Loaded", _filenames.Count);
             flowLayoutPanelFiles.Visible = true;
             buttonExport.Enabled = true;
         }
 
-        private void GetDataColumnsForFiles(IEnumerable<string> fileNames)
+        private void GetDataColumnsAndTotalEpochsFromFiles(IEnumerable<string> fileNames)
         {
             if (fileNames == null || !fileNames.Any())
                 return;
@@ -253,7 +262,10 @@ namespace ExportEpochData
                 List<string> fileColumns;
                 string connectionString = GetSQLiteConnectionString(filename);
                 using (IDbConnection db = new OrmLiteConnectionFactory(connectionString, SqliteDialect.Provider).OpenDbConnection())
+                { 
                     fileColumns = GetColumnsFromFile(db);
+                    _totalEpochs += db.Count<AgdTableTimestampAxis1>();
+                }
 
                 foreach (var columnName in fileColumns)
                     if (!_columnNames.Contains(columnName))
