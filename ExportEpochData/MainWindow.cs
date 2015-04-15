@@ -49,7 +49,7 @@ namespace ExportEpochData
 
                 exportFileName = saveFile.FileName;
             }
-
+            
             using (var progressDialog = new ProgressDialog())
             {
                 progressDialog.Description = "Exporting Epoch Data...";
@@ -114,16 +114,12 @@ namespace ExportEpochData
                                 var firstOrDefault = db.Select<AgdSettings>().FirstOrDefault(x => x.Name.Equals("subjectname"));
                                 if (firstOrDefault != null)
                                     subjectName = firstOrDefault.Value;
-
-                                long totalEpochs = db.Count<AgdTableTimestampAxis1>();
                                 
-
                                 var fileColumns = GetColumnsFromFile(db);
 
                                 var cmd = db.CreateCommand();
                                 cmd.CommandText = "select * from data order by dataTimestamp";
 
-                                long currentFileEpoch = 0;
                                 //pull the tables in a reader
                                 using (cmd)
                                 {
@@ -131,7 +127,6 @@ namespace ExportEpochData
                                     {
                                         while (rdr.Read())
                                         {
-                                            currentFileEpoch++;
                                             if (++epochCount % 10000 == 0)
                                             {
                                                 if (progressDialog.CancellationPending)
@@ -140,10 +135,8 @@ namespace ExportEpochData
                                                 int percentage = Math.Min(100, (int)((double)(epochCount) / _totalEpochs * 100.0));
 
                                                 progressDialog.ReportProgress(percentage,
-                                                    string.Format("Exporting File {0} of {1} ({2}%)", currentFileCount,
-                                                        totalFilesToCalculate, percentage),
-                                                    string.Format("Exporting epoch #{0} of {1} for file: {2}",
-                                                        currentFileEpoch, totalEpochs, filenameWithoutPath));
+                                                    string.Format("Exporting File {0} of {1}", currentFileCount, totalFilesToCalculate),
+                                                    string.Format("Exporting epoch #{0} of {1} ({2}%)", epochCount, _totalEpochs, percentage));
                                             }
 
                                             foreach (var columnName in columnNames)
