@@ -110,7 +110,7 @@ namespace ExportEpochData
                             string connectionString = GetSQLiteConnectionString(filename);
                             using (var db = new OrmLiteConnectionFactory(connectionString, SqliteDialect.Provider).OpenDbConnection())
                             {
-                                string subjectName = "filename";
+                                string subjectName = filenameWithoutPath;
                                 var firstOrDefault = db.Select<AgdSettings>().FirstOrDefault(x => x.Name.Equals("subjectname"));
                                 if (firstOrDefault != null)
                                     subjectName = firstOrDefault.Value;
